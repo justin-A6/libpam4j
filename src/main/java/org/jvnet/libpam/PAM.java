@@ -31,6 +31,8 @@ import static org.jvnet.libpam.impl.CLibrary.libc;
 import com.sun.jna.Pointer;
 import static com.sun.jna.Native.POINTER_SIZE;
 import com.sun.jna.ptr.PointerByReference;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import java.util.logging.Logger;
@@ -66,6 +68,13 @@ public class PAM {
      */
     private String password;
 
+    private String newPassword1;
+    private String newPassword2;
+
+    private List<String> errorList;
+
+    private static final String NEW_PASSWORD = "New password";
+    private static final String RETYPE_NEW_PASSWORD = "Retype new password";
     /**
      * Creates a new authenticator.
      *
@@ -74,6 +83,7 @@ public class PAM {
      *      in the PAM configuration,
      */
     public PAM(String serviceName) throws PAMException {
+        errorList = new ArrayList<String>();
         conv = new pam_conv(new PamCallback() {
             public int callback(int num_msg, Pointer msg, Pointer resp, Pointer __) {
                 LOGGER.fine("pam_conv num_msg="+num_msg);
@@ -89,8 +99,22 @@ public class PAM {
                     LOGGER.fine(pm.msg_style+":"+pm.msg);
                     if(pm.msg_style==PAM_PROMPT_ECHO_OFF) {
                         pam_response r = new pam_response(m.share(pam_response.SIZE*i));
-                        r.setResp(password);
+                        if (pm.msg.contains(NEW_PASSWORD)) {
+                            if (newPassword1==null) {
+                                return PAM_CONV_ERR;
+                            }
+                            r.setResp(newPassword1);
+                        } else if (pm.msg.contains(RETYPE_NEW_PASSWORD)) {
+                            if (newPassword2==null) {
+                                return PAM_CONV_ERR;
+                            }
+                            r.setResp(newPassword2);
+                        } else {
+                            r.setResp(password);
+                        }
                         r.write(); // write to (*resp)[i]
+                    } else if (pm.msg_style==PAM_ERROR_MSG) {
+                        errorList.add(pm.msg);
                     }
                 }
 
@@ -140,6 +164,48 @@ public class PAM {
         } finally {
             this.password = null;
         }
+    }
+
+    /**
+     * Changes a user's password.
+     * Obeys any password requirements as defined by the pam definition for the calling service.
+     * @param username
+     * @param password
+     * @param newPassword1
+     * @param newPassword1
+     * @return Upon a successful password change, return information about the user.
+     * @throws PAMException
+     */
+    public UnixUser changePassword(String username, String password, String newPassword1, String newPassword2) throws PAMException {
+        this.password = password;
+        this.newPassword1 = newPassword1;
+        this.newPassword2 = newPassword2;
+        try {
+            check(libpam.pam_set_item(pht,PAM_USER,username),"pam_set_item failed");
+            PointerByReference argv = new PointerByReference();
+            check(libpam.pam_chauthtok(pht,0),"pam_chauthtok failed");
+            check(libpam.pam_setcred(pht,0),"pam_setcred failed");
+            // several different error code seem to be used to represent authentication failures
+            check(libpam.pam_acct_mgmt(pht,0),"pam_acct_mgmt failed");
+
+            PointerByReference r = new PointerByReference();
+            check(libpam.pam_get_item(pht,PAM_USER,r),"pam_get_item failed");
+            String userName = r.getValue().getString(0);
+            passwd pwd = libc.getpwnam(userName);
+            if(pwd==null)
+                throw new PAMException("Password change succeeded but no user information is available");
+            return new UnixUser(userName,pwd);
+        } finally {
+            this.password = null;
+        }
+    }
+
+    /**
+     * Returns a list of errors thrown during pam_conv
+     * @return List of errors thrown during pam_conv
+     */
+    public List<String> getConvErrorList() {
+        return this.errorList;
     }
 
     /**

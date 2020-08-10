@@ -130,6 +130,7 @@ public interface PAMLibrary extends Library {
     int pam_authenticate(pam_handle_t handle, int flags);
     int pam_setcred(pam_handle_t handle, int flags);
     int pam_acct_mgmt(pam_handle_t handle, int flags);
+    int pam_chauthtok(pam_handle_t handle, int flags);
     String pam_strerror(pam_handle_t handle, int pam_error);
 
     final int PAM_USER = 2;
@@ -137,6 +138,7 @@ public interface PAMLibrary extends Library {
     // error code
     final int PAM_SUCCESS = 0;
     final int PAM_CONV_ERR = 6;
+    final int PAM_AUTHTOK_ERR = 20;
 
 
     final int PAM_PROMPT_ECHO_OFF  = 1; /* Echo off when getting response */
